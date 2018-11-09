@@ -1,0 +1,188 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+Attaching these libraries allows us to plot the data as well as manipulate it.
+```{r}
+library(tidyverse)
+library(reshape2)
+```
+Here we read the data from the comma separated file into a table.
+```{r}
+housing = read.csv('C:/Users/Hussan/Documents/BayAreaHousingMachineLearning/housing.csv')
+```
+
+
+
+Here we check the data for possible problems.
+```{r}
+summary(housing)
+```
+Before working with the data, we see that there are some problems.
+
+The first is that there are NA's in the total_bedrooms column. These need to be addressed by filling them with an average value.
+
+The second is that the ocean_proximity has multiple categories. This is not a huge problem, but for the sake of simplicity, we will split them into binary columns.
+
+The third is the total_bedrooms and total_rooms columns. They are generally unclear in what they represent and can be replaced by a mean number of rooms and bedrooms per house.
+
+
+
+
+Plotting the data to check for abnormalities.
+```{r}
+par(mfrow=c(2,5))
+ggplot(data = melt(housing), mapping = aes(x = value)) + 
+    geom_histogram(bins = 30) + facet_wrap(~variable, scales = 'free_x')
+
+```
+
+Two things are immediately noticable. There are two spikes at the edges of the median_house_value and housing_median_age graphs. The median house_house_value of the abundant sales at 550,000 most likely means that that a cap has been placed on the value and higher value sales are grouped under the 550,000 limit. The housing_median_age spike may be similar, or natural. To be safe, we will remove the abnormal values.
+
+
+Now we will clean the data.
+
+Imputing missing values into total_bedrooms.
+```{r}
+housing$total_bedrooms[is.na(housing$total_bedrooms)] = median(housing$total_bedrooms , na.rm = TRUE)
+```
+
+Making the total columns, mean columns.
+```{r}
+housing$mean_bedrooms = housing$total_bedrooms/housing$households
+housing$mean_rooms = housing$total_rooms/housing$households
+
+drops = c('total_bedrooms', 'total_rooms')
+
+housing = housing[ , !(names(housing) %in% drops)]
+```
+
+
+Turning the categorical data into boolean columns
+```{r}
+categories = unique(housing$ocean_proximity)
+
+cat_housing = data.frame(ocean_proximity = housing$ocean_proximity)
+
+for(cat in categories){
+    cat_housing[,cat] = rep(0, times= nrow(cat_housing))
+}
+
+for(i in 1:length(cat_housing$ocean_proximity)){
+    cat = as.character(cat_housing$ocean_proximity[i])
+    cat_housing[,cat][i] = 1
+}
+    
+cat_columns = names(cat_housing)
+keep_columns = cat_columns[cat_columns != 'ocean_proximity']
+cat_housing = select(cat_housing,one_of(keep_columns))    
+
+
+```
+
+
+Our next step is going to be to scale our numerical values to increase accuracy.
+
+```{r}
+drops = c('ocean_proximity','median_house_value')
+housing_num =  housing[ , !(names(housing) %in% drops)]
+
+scaled_housing_num = scale(housing_num)
+```
+Now we will merge the scaled and altered dataframes
+
+```{r}
+cleaned_housing = cbind(cat_housing, scaled_housing_num, median_house_value=housing$median_house_value)
+```
+
+
+
+Now it is time to train the data. The first step is to create a training environment.
+
+```{r}
+set.seed(1998)
+
+sample = sample.int(n = nrow(cleaned_housing), size = floor(.8*nrow(cleaned_housing)), replace = F)
+train = cleaned_housing[sample, ] #just the samples
+test  = cleaned_housing[-sample, ]
+
+
+
+
+#everything but the samples
+```
+
+
+
+Now we will use cross validation to test the model using the training data.
+```{r}
+library('boot')
+
+glm_house = glm(median_house_value~median_income+mean_rooms+population, data=cleaned_housing)
+k_fold_cv_error = cv.glm(cleaned_housing , glm_house, K=5)
+
+k_fold_cv_error$delta
+
+
+```
+```{r}
+glm_cv_rmse = sqrt(k_fold_cv_error$delta)[1]
+glm_cv_rmse
+```
+
+
+The machine learning algorithm we will use is randomforest.
+```{r}
+library(randomForest)
+
+set.seed(1738)
+
+train_y = train[,'median_house_value']
+train_x = train[, names(train) !='median_house_value']
+
+test_y = test[, 'median_house_value']
+test_x = test[, names(test)!= 'median_house_value']
+
+```
+
+```{r}
+rf_model = randomForest(train_x, y = train_y, xtest = test_x, ytest = test_y, ntree = 50, keep.forest = TRUE, importance = TRUE)
+```
+
+
+```{r}
+rf_model$importance
+```
+
+
+
+```{r}
+y_pred = predict(rf_model , test_x)
+test_mse = mean(((y_pred - test_y)^2))
+test_rmse = sqrt(test_mse)
+test_rmse
+```
+
+
+
+
+price of random house =
+452,600
+```{r}
+random_test <- matrix(c(1,
+0,
+0,
+0,
+0,
+-1.327803,
+1.052523,
+0.98211887,
+-0.97440499,
+-0.977009185,
+2.34470896,
+-0.148510661,
+0.62854423), ncol =13)
+
+random_predict = predict(rf_model, random_test)
+```
+
